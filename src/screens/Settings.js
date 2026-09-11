@@ -233,248 +233,122 @@ export default function Settings({ navigation }) {
 
   }, [navigation]);
 
+// =========================================================
+// GO TO SIGN IN (UPDATED)
+// =========================================================
 
-  // =========================================================
-  // GO TO SIGN IN
-  // =========================================================
-
-  const goToSignIn = useCallback(() => {
-
-    try {
-
-      const rootNavigation =
-        getRootNavigation();
-
-
-      if (!rootNavigation) {
-
-        console.error(
-          '[Settings] Root navigator not found.'
+const goToSignIn = useCallback(() => {
+  try {
+    // Step 1: Get parent navigator (likely a stack navigator containing 'SignIn')
+    const parentNav = navigation.getParent();
+    if (parentNav) {
+      console.log('[Settings] Parent navigator state:', parentNav.getState());
+      // Check if parent has 'SignIn' route
+      const parentState = parentNav.getState();
+      const hasSignIn = parentState?.routeNames?.includes('SignIn');
+      if (hasSignIn) {
+        parentNav.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [{ name: 'SignIn' }],
+          })
         );
-
-        return false;
-
+        console.log('[Settings] Navigated to SignIn using parent navigator reset.');
+        return true;
       }
+    }
 
-
-      console.log(
-        '[Settings] Root navigation state:',
-        rootNavigation.getState()
-      );
-
-
-      // -------------------------------------------------------
-      // Completely reset the ROOT stack.
-      //
-      // This removes Main and all its tabs from history.
-      // User cannot press Back and return to Main.
-      // -------------------------------------------------------
-
+    // Step 2: Fallback to root navigator
+    const rootNavigation = getRootNavigation();
+    if (rootNavigation) {
+      console.log('[Settings] Root navigator state:', rootNavigation.getState());
       rootNavigation.dispatch(
         CommonActions.reset({
           index: 0,
-
-          routes: [
-            {
-              name: 'SignIn',
-            },
-          ],
-
+          routes: [{ name: 'SignIn' }],
         })
       );
-
-
-      console.log(
-        '[Settings] Successfully navigated to SignIn.'
-      );
-
+      console.log('[Settings] Navigated to SignIn using root navigator reset.');
       return true;
-
-    } catch (error) {
-
-      console.error(
-        '[Settings] Navigation error:',
-        error
-      );
-
-      return false;
-
     }
 
-  }, [getRootNavigation]);
+    // Step 3: Final fallback using direct navigation
+    console.warn('[Settings] Could not reset navigator, using direct navigate.');
+    navigation.navigate('SignIn');
+    return true;
+  } catch (error) {
+    console.error('[Settings] Navigation error:', error);
+    return false;
+  }
+}, [navigation, getRootNavigation]);
 
 
   // =========================================================
   // LOGOUT
   // =========================================================
 
-  const handleSignOut = useCallback(() => {
+// =========================================================
+// LOGOUT
+// =========================================================
 
-    // Prevent multiple logout clicks
-    if (loggingOut || testing) {
-      return;
-    }
+const handleSignOut = useCallback(() => {
+  if (loggingOut || testing) return;
 
+  Alert.alert(
+    'Logout',
+    'Are you sure you want to log out?',
+    [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setLoggingOut(true);
+            console.log('[Logout] Starting logout...');
 
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to log out?',
-      [
+            // 1. Remove current user from storage
+            await setCurrentUser(null);
+            console.log('[Logout] Current user removed from storage.');
 
-        // -----------------------------------------------------
-        // CANCEL
-        // -----------------------------------------------------
+            // 2. Verify storage
+            const userAfterLogout = await getCurrentUser();
+            console.log('[Logout] User after logout:', userAfterLogout);
 
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-
-
-        // -----------------------------------------------------
-        // LOGOUT
-        // -----------------------------------------------------
-
-        {
-          text: 'Logout',
-          style: 'destructive',
-
-          onPress: async () => {
-
-            try {
-
-              setLoggingOut(true);
-
-              console.log(
-                '================================='
-              );
-
-              console.log(
-                '[Logout] Starting logout...'
-              );
-
-
-              // =================================================
-              // STEP 1
-              // Remove current user from storage
-              // =================================================
-
-              await setCurrentUser(null);
-
-              console.log(
-                '[Logout] Current user removed from storage.'
-              );
-
-
-              // =================================================
-              // STEP 2
-              // VERIFY STORAGE
-              // =================================================
-
-              const userAfterLogout =
-                await getCurrentUser();
-
-              console.log(
-                '[Logout] User after logout:',
-                userAfterLogout
-              );
-
-
-              // -------------------------------------------------
-              // If user still exists, logout failed
-              // -------------------------------------------------
-
-              if (userAfterLogout) {
-
-                throw new Error(
-                  'Logout failed: current user still exists in storage.'
-                );
-
-              }
-
-
-              console.log(
-                '[Logout] Storage successfully cleared.'
-              );
-
-
-              // =================================================
-              // STEP 3
-              // CLEAR LOCAL STATE
-              // =================================================
-
-              setUser(null);
-              setAdmin(false);
-
-              setApiKey('');
-              setTempKey('');
-
-              setStatus({
-                visible: false,
-                type: '',
-                message: '',
-              });
-
-
-              // =================================================
-              // STEP 4
-              // RESET ROOT NAVIGATION
-              // =================================================
-
-              const navigationSuccess =
-                goToSignIn();
-
-
-              if (!navigationSuccess) {
-
-                throw new Error(
-                  'Logout succeeded, but navigation to Sign In failed.'
-                );
-
-              }
-
-
-              console.log(
-                '[Logout] Logout completed successfully.'
-              );
-
-              console.log(
-                '================================='
-              );
-
-
-            } catch (error) {
-
-              console.error(
-                '[Logout] Logout error:',
-                error
-              );
-
-              Alert.alert(
-                'Logout Failed',
-                error?.message ||
-                'Could not log out. Please try again.'
-              );
-
-            } finally {
-
-              setLoggingOut(false);
-
+            if (userAfterLogout) {
+              throw new Error('Logout failed: current user still exists in storage.');
             }
 
-          },
+            // 3. Clear local state
+            setUser(null);
+            setAdmin(false);
+            setApiKey('');
+            setTempKey('');
+            setStatus({ visible: false, type: '', message: '' });
 
+            // 4. Navigate to SignIn (with fallback)
+            const navigationSuccess = goToSignIn();
+            if (!navigationSuccess) {
+              // Fallback: directly navigate using current navigation object
+              console.warn('[Logout] Root navigation failed, trying fallback navigation.');
+              navigation.navigate('SignIn');
+            }
+
+            console.log('[Logout] Logout completed successfully.');
+          } catch (error) {
+            console.error('[Logout] Logout error:', error);
+            Alert.alert('Logout Failed', error?.message || 'Could not log out. Please try again.');
+          } finally {
+            setLoggingOut(false);
+          }
         },
-
-      ]
-
-    );
-
-  }, [
-    loggingOut,
-    testing,
-    goToSignIn,
-  ]);
+      },
+    ]
+  );
+}, [loggingOut, testing, goToSignIn, navigation]);
 
 
   // =========================================================
@@ -885,53 +759,6 @@ export default function Settings({ navigation }) {
 
       )}
 
-
-      {/* ================================================== */}
-      {/* LOGOUT */}
-      {/* ================================================== */}
-
-      <TouchableOpacity
-        style={[
-          styles.smallButton,
-          styles.dangerButton,
-
-          (loggingOut || testing) &&
-          styles.disabledButton,
-        ]}
-        onPress={handleSignOut}
-        disabled={loggingOut || testing}
-        activeOpacity={0.7}
-      >
-
-        {loggingOut ? (
-
-          <View style={styles.logoutContent}>
-
-            <ActivityIndicator
-              color="#fff"
-              size="small"
-            />
-
-            <Text
-              style={[
-                styles.smallButtonText,
-                styles.logoutText,
-              ]}
-            >
-              Logging out...
-            </Text>
-
-          </View>
-
-        ) : (
-
-          <Text style={styles.smallButtonText}>
-            Logout
-          </Text>
-
-        )}
-
-      </TouchableOpacity>
 
     </View>
 

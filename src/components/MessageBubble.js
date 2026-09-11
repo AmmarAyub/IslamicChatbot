@@ -111,6 +111,7 @@ export default function MessageBubble({ message, onFlag }) {
 
   return (
     <View style={[styles.bubble, isUser ? styles.userBubble : styles.botBubble]}>
+      <Text style={styles.category}>{message.category || 'Islamic Guidance'}</Text>
       <Text style={styles.text}>{message.text}</Text>
       {!isUser && (
         <TouchableOpacity onPress={onFlag} style={styles.flagButton}>
@@ -144,6 +145,12 @@ const styles = StyleSheet.create({
   text: {
     fontSize: 16,
     color: '#333',
+  },
+  category: {
+    color: '#0f6b52',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
   },
   flagButton: {
     marginTop: 6,

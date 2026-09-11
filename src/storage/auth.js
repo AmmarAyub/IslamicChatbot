@@ -1,24 +1,24 @@
- import storage from './secureStorageWeb';
+import * as ExpoCrypto from 'expo-crypto';
+import storage from './secureStorageWeb';
 
 const USERS_KEY = '@chatboard_users';
 const CURRENT_USER_KEY = '@chatboard_current_user';
 
 async function sha256(message) {
-  if (window.crypto && window.crypto.subtle) {
+  const webCrypto = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+
+  if (webCrypto?.subtle) {
     const encoder = new TextEncoder();
     const data = encoder.encode(message);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashBuffer = await webCrypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  } else {
-    let hash = 0;
-    for (let i = 0; i < message.length; i++) {
-      const char = message.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(16);
   }
+
+  return ExpoCrypto.digestStringAsync(
+    ExpoCrypto.CryptoDigestAlgorithm.SHA256,
+    message
+  );
 }
 
 export async function getUsers() {
@@ -30,24 +30,26 @@ export async function saveUsers(users) {
   await storage.setItem(USERS_KEY, JSON.stringify(users));
 }
 
-export async function createUser(username, password, role = 'user') {
+export async function createUser(username, password, role = 'user', fiqah = '') {
+  const normalizedUsername = username.trim();
   const users = await getUsers();
-  if (users[username]) {
+  if (users[normalizedUsername]) {
     throw new Error('Username already exists');
   }
   const hashed = await sha256(password);
-  users[username] = { password: hashed, role };
+  users[normalizedUsername] = { password: hashed, role, fiqah };
   await saveUsers(users);
   return true;
 }
 
 export async function authenticateUser(username, password) {
+  const normalizedUsername = username.trim();
   const users = await getUsers();
-  const user = users[username];
+  const user = users[normalizedUsername];
   if (!user) return null;
   const hashed = await sha256(password);
   if (user.password === hashed) {
-    return { username, role: user.role };
+    return { username: normalizedUsername, role: user.role, fiqah: user.fiqah || '' };
   }
   return null;
 }
