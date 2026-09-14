@@ -26,6 +26,7 @@ import SignUp from './src/screens/SignUp';
 import AccountsManagement from './src/screens/AccountsManagement';
 import Dashboard from './src/screens/Dashboard';
 import ApprovedContent from './src/screens/ApprovedContent';
+import MessageBlog from './src/screens/MessageBlog';
 import { getCurrentUser } from './src/storage/auth';
 import AppHeader from './src/components/AppHeader';
 
@@ -60,6 +61,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Dashboard" component={Dashboard} options={{ title: 'Home' }} />
       <Tab.Screen name="Chat" component={ChatStack} options={{ title: 'Chat' }} />
+      <Tab.Screen name="MessageBlog" component={MessageBlog} options={{ title: 'Message Blog' }} />
       {userRole === 'admin' && (
         <Tab.Screen name="ScholarReview" component={ScholarReview} options={{ title: 'Review' }} />
       )}

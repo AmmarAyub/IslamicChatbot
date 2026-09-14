@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MessageBubble from '../components/MessageBubble';
@@ -18,19 +19,29 @@ import { classifyReligiousContent, getReligiousContentMessage } from '../utils/c
 
 const CONVERSATIONS_KEY = '@chatboard_conversations';
 
+const QUICK_TOPICS = [
+  { id: 'quran', label: 'Quran', icon: '▣', category: 'Quran', questions: ['Explain the meaning of Ayatul Kursi (2:255).', 'What are the main themes of Surah Ar-Rahman?', 'Explain Surah Al-Fatiha verse by verse.', 'What is the significance of Surah Yasin?'] },
+  { id: 'fiqh', label: 'Fiqh', icon: '⚖', category: 'Fiqah and Worship', questions: ['What are the essential steps of Wudu?', 'How do I perform Salah correctly?', 'What breaks the fast in Ramadan?', 'How is Zakat calculated?'] },
+  { id: 'dua', label: 'Dua', icon: '🤲', category: 'Dua', questions: ['What is the best way to make Dua?', 'Which Dua can I recite for forgiveness?', 'What Dua should I make when feeling anxious?', 'When are the best times for Dua to be accepted?'] },
+  { id: 'seerah', label: 'Seerah', icon: '⌂', category: 'Seerah', questions: ['What are the key lessons from the Hijrah?', 'How did the Prophet Muhammad (peace be upon him) show mercy?', 'What happened at the Treaty of Hudaybiyyah?', 'What can we learn from the Prophet’s character?'] },
+  { id: 'hadith', label: 'Hadith', icon: '▤', category: 'Hadith and Sunnah', questions: ['What is the difference between Hadith and Sunnah?', 'How are Hadith authenticated?', 'Share a Hadith about kindness and explain it.', 'Why are Hadith important for Muslims?'] },
+];
+
 export default function Chatboard({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [messages, setMessages] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
-  const [aiSettings, setAiSettings] = useState({ apiKey: '', model: 'gemini-1.5-flash' });
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
+  const [activeTopic, setActiveTopic] = useState(null);
+  const [openTopic, setOpenTopic] = useState(null);
+  const [isSending, setIsSending] = useState(false);
 
   useEffect(() => {
     const init = async () => {
       try {
         const user = await loadCurrentUser();
-        await Promise.all([loadConversations(user), loadAiSettings()]);
+        await loadConversations(user);
       } catch (error) {
         console.error(error);
         Alert.alert('Error', 'Failed to load data.');
@@ -40,15 +51,6 @@ export default function Chatboard({ navigation }) {
     };
     init();
   }, []);
-
-  const loadAiSettings = async () => {
-    try {
-      const config = await aiConfig.getAiConfig();
-      setAiSettings(config);
-    } catch (error) {
-      console.error(error);
-    }
-  };
 
   const loadCurrentUser = async () => {
     try {
@@ -133,10 +135,14 @@ export default function Chatboard({ navigation }) {
     await saveConversations(nextConversations);
   };
 
-  const updateActiveConversation = async newMessages => {
+  const updateActiveConversation = async (newMessages, interactionId) => {
     const updatedConversations = conversations.map(conversation => (
       conversation.id === activeConversationId
-        ? { ...conversation, messages: newMessages }
+        ? {
+          ...conversation,
+          messages: newMessages,
+          ...(interactionId ? { geminiInteractionId: interactionId } : {}),
+        }
         : conversation
     ));
     setConversations(updatedConversations);
@@ -144,15 +150,18 @@ export default function Chatboard({ navigation }) {
     await saveConversations(updatedConversations);
   };
 
-  const sendMessage = async text => {
+  const sendMessage = async (text, topic = activeTopic) => {
     const trimmedText = text.trim();
-    if (!trimmedText) return;
+    if (!trimmedText || isSending) return;
 
     const classification = classifyReligiousContent(trimmedText);
-    if (!classification.isReligious) {
+    if (!classification.isReligious && !topic) {
       Alert.alert('Religious questions only', getReligiousContentMessage());
       return;
     }
+
+    const category = topic?.category || classification.category;
+    setIsSending(true);
 
     const userMessage = {
       id: Date.now().toString(),
@@ -160,7 +169,7 @@ export default function Chatboard({ navigation }) {
       conversationId: activeConversationId,
       role: 'user',
       text: trimmedText,
-      category: classification.category,
+      category,
       timestamp: Date.now(),
     };
     const updatedWithUser = [...messages, userMessage];
@@ -168,23 +177,42 @@ export default function Chatboard({ navigation }) {
     await localDb.addMessage(userMessage);
 
     try {
-      const reply = await generateReply(trimmedText, classification.category);
+      const reply = await generateReply(trimmedText, category);
       const botMessage = {
         id: (Date.now() + 1).toString(),
         ownerId: currentUser?.username,
         conversationId: activeConversationId,
         role: 'bot',
-        text: reply,
-        category: classification.category,
+        text: reply.text,
+        category,
         reviewed: false,
         timestamp: Date.now(),
       };
-      await updateActiveConversation([...updatedWithUser, botMessage]);
+      await updateActiveConversation(
+        [...updatedWithUser, botMessage],
+        reply.interactionId
+      );
       await localDb.addMessage(botMessage);
     } catch (error) {
       console.error(error);
-      Alert.alert('Error', 'Unable to get a response.');
+      Alert.alert(
+        'AI response unavailable',
+        `${error?.message || 'Unable to get a response.'}\n\nOpen Settings and use “Test API” to verify your Gemini API key.`
+      );
+    } finally {
+      setIsSending(false);
     }
+  };
+
+  const openTopicQuestions = topic => {
+    setActiveTopic(topic);
+    setOpenTopic(current => current?.id === topic.id ? null : topic);
+  };
+
+  const sendSuggestedQuestion = (topic, question) => {
+    setActiveTopic(topic);
+    setOpenTopic(null);
+    sendMessage(question, topic);
   };
 
   const generateReply = async (text, category) => {
@@ -192,43 +220,13 @@ export default function Chatboard({ navigation }) {
       ? `The user's stated Fiqah or Madhhab is ${currentUser.fiqah}. Consider this perspective when answering, while respectfully noting recognized differences between schools where relevant.`
       : 'The user has not specified a Fiqah or Madhhab. Give a balanced answer and mention recognized scholarly differences where relevant.';
 
-    if (aiSettings.apiKey) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${aiSettings.model}:generateContent`;
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': aiSettings.apiKey,
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: `Answer this Islamic query clearly and respectfully. The category is ${category}. ${fiqahContext}\n\nQuestion:\n${text}`,
-              }],
-            }],
-          }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error?.message || 'Gemini failed');
-        const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (answer) return answer.trim();
-      } catch (error) {
-        console.error('Gemini error:', error);
-      }
-    }
-
-    try {
-      const knowledgeBase = await localDb.getKB();
-      const query = text.toLowerCase();
-      for (const item of knowledgeBase) {
-        if (query.includes(item.keyword.toLowerCase())) return item.answer;
-      }
-      return 'Thank you for your question. Here is a general Islamic perspective: Please consult the Quran and Sunnah. If you need detailed scholarly guidance, flag this response for a scholar review.';
-    } catch (error) {
-      console.error(error);
-      return 'Unable to generate reply. Please try again.';
-    }
+    const activeConversation = conversations.find(
+      conversation => conversation.id === activeConversationId
+    );
+    return aiConfig.createGeminiInteraction(
+      `Answer this Islamic query clearly, accurately, and respectfully. The category is ${category}. ${fiqahContext}\n\nQuestion:\n${text}`,
+      activeConversation?.geminiInteractionId
+    );
   };
 
   const flagForReview = async message => {
@@ -324,6 +322,54 @@ export default function Chatboard({ navigation }) {
             )}
             contentContainerStyle={styles.messageList}
           />
+          <View style={styles.topicArea}>
+            <Text style={styles.topicPrompt}>Explore an Islamic topic</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.topicList}>
+              {QUICK_TOPICS.map(topic => {
+                const isSelected = activeTopic?.id === topic.id;
+                return (
+                  <TouchableOpacity
+                    key={topic.id}
+                    style={[styles.topicButton, isSelected && styles.topicButtonSelected]}
+                    onPress={() => openTopicQuestions(topic)}
+                    disabled={isSending}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected, disabled: isSending }}
+                    accessibilityLabel={`Show ${topic.label} questions`}
+                  >
+                    <Text style={styles.topicIcon}>{topic.icon}</Text>
+                    <Text style={[styles.topicText, isSelected && styles.topicTextSelected]}>{topic.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            {openTopic ? (
+              <View style={styles.questionDropdown}>
+                <View style={styles.dropdownHeader}>
+                  <View style={styles.dropdownTitleRow}>
+                    <Text style={styles.dropdownIcon}>{openTopic.icon}</Text>
+                    <Text style={styles.dropdownTitle}>{openTopic.label}</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setOpenTopic(null)} accessibilityRole="button" accessibilityLabel="Close suggested questions">
+                    <Text style={styles.dropdownCloseText}>×</Text>
+                  </TouchableOpacity>
+                </View>
+                {openTopic.questions.map(question => (
+                  <TouchableOpacity
+                    key={question}
+                    style={styles.suggestedQuestion}
+                    onPress={() => sendSuggestedQuestion(openTopic, question)}
+                    disabled={isSending}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Ask: ${question}`}
+                  >
+                    <Text style={styles.suggestedQuestionText}>{question}</Text>
+                    <Text style={styles.questionArrow}>›</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
+          </View>
           <MessageInput onSend={sendMessage} />
         </View>
       </View>
@@ -365,4 +411,21 @@ const styles = StyleSheet.create({
   deleteButtonText: { color: '#b33a3a', fontSize: 20, fontWeight: '700' },
   mainPanel: { flex: 1, backgroundColor: '#f5f5f5' },
   messageList: { padding: 12, flexGrow: 1 },
+  topicArea: { backgroundColor: '#fff', borderTopColor: '#e1e7e3', borderTopWidth: 1, paddingTop: 9 },
+  topicPrompt: { color: '#53665e', fontSize: 12, fontWeight: '600', paddingHorizontal: 12, marginBottom: 7 },
+  topicList: { paddingHorizontal: 12, paddingBottom: 9 },
+  topicButton: { alignItems: 'center', backgroundColor: '#f4f6f5', borderColor: '#d9e2dc', borderRadius: 18, borderWidth: 1, flexDirection: 'row', marginRight: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  topicButtonSelected: { backgroundColor: '#0f6b52', borderColor: '#0f6b52' },
+  topicIcon: { fontSize: 14, marginRight: 6 },
+  topicText: { color: '#334d43', fontSize: 13, fontWeight: '700' },
+  topicTextSelected: { color: '#fff' },
+  questionDropdown: { backgroundColor: '#fff', borderColor: '#ccd8d1', borderRadius: 12, borderWidth: 1, marginHorizontal: 12, marginBottom: 10, overflow: 'hidden' },
+  dropdownHeader: { alignItems: 'center', borderBottomColor: '#e7eee9', borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 11 },
+  dropdownTitleRow: { alignItems: 'center', flexDirection: 'row' },
+  dropdownIcon: { fontSize: 14, marginRight: 8 },
+  dropdownTitle: { color: '#153b32', fontSize: 14, fontWeight: '700' },
+  dropdownCloseText: { color: '#71827a', fontSize: 22, lineHeight: 22 },
+  suggestedQuestion: { alignItems: 'center', borderBottomColor: '#edf2ee', borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 13 },
+  suggestedQuestionText: { color: '#334d43', flex: 1, fontSize: 14, fontWeight: '500', lineHeight: 20, paddingRight: 12 },
+  questionArrow: { color: '#0f6b52', fontSize: 24, lineHeight: 20 },
 });
